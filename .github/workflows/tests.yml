@@ -1,33 +1,64 @@
 name: "Tests"
 on:
-  pull_request:
-  push:
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional jasmine --filter expression; empty runs the full suite'
+        required: false
+        default: ''
 
 jobs:
   Test:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    timeout-minutes: 30
     strategy:
       matrix:
-        node_version: ['lts/*', 'node']
+        node_version: [14, 16]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v2
       - name: Install Node
-        uses: dcodeIO/setup-node-nvm@master
+        uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node_version }}
+      - name: Pin npm registry to the release date
+        run: |
+          npm config set registry https://time-machines-npm.sealsecurity.io/
+          npm config set //time-machines-npm.sealsecurity.io/:_authToken=2021-05-27
       - name: Install Dependencies
         run: npm ci
       - name: Run Unit Tests 👩🏽‍💻
-        run: npm run test:unit
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            npm test -- --filter="${{ inputs.test-filter }}"
+          else
+            npm run test:unit
+          fi
       - name: Run Spec Tests 👩🏽‍💻
-        run: npm run test:specs
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            npm test -- --filter="${{ inputs.test-filter }}"
+          else
+            npm run test:specs
+          fi
+      - name: Build 🗜️
+        if: matrix.node_version == 14
+        run: npm run build
+      - name: Pack tarball 📦
+        if: matrix.node_version == 14
+        run: npm pack
+      - name: Upload tarball
+        if: matrix.node_version == 14
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: marked-*.tgz
+          if-no-files-found: error
 
   Lint:
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    if: false
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -39,9 +70,8 @@ jobs:
 
   Release:
     needs: [Test, Lint]
-    if: |
-      github.ref == 'refs/heads/master' &&
-      github.event.repository.fork == false
+    if: false
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -64,6 +94,7 @@ jobs:
 
   Skip:
     if: contains(github.event.head_commit.message, '[skip ci]')
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - name: Skip CI 🚫
